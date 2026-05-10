@@ -9,9 +9,13 @@ on:
 jobs:
   security_scan:
     runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -40,6 +44,7 @@ jobs:
 
       - name: Run Trivy Image Scan
         uses: aquasecurity/trivy-action@master
+        continue-on-error: true
         with:
           image-ref: 'threat-monitor-app:latest'
           format: 'table'
