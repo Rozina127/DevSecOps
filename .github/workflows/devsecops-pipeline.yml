@@ -74,7 +74,7 @@ jobs:
       - name: "🏗️ Phase 6 — Checkov IaC Scan (Dockerfile + YAML)"
         uses: bridgecrewio/checkov-action@master
         with:
-          directory: devsecops-dashboard
+          directory: .
           # Dockerfile aur GitHub Actions YAML scan karo
           framework: dockerfile,github_actions
           # Soft fail — pipeline rukay nahi, sirf report show karo
@@ -103,7 +103,6 @@ jobs:
 
       - name: "🐳 Build Docker Image"
         run: docker build -t threat-monitor-app:latest .
-        working-directory: devsecops-dashboard
 
       # ── Phase 3: Container Scanning ───────────────────────────
       # Trivy Docker image mein OS packages aur libraries scan karta hai

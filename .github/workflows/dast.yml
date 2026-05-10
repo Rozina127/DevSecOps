@@ -23,7 +23,6 @@ jobs:
       # App ka Docker image build karo
       - name: "🐳 Build Docker Image"
         run: docker build -t threat-monitor-app:latest .
-        working-directory: devsecops-dashboard
 
       # App ko background mein chalaao
       - name: "🚀 Run Application in Docker"
