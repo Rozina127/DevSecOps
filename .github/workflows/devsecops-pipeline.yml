@@ -1,4 +1,14 @@
-name: DevSecOps Pipeline
+name: "DevSecOps Full Security Pipeline"
+
+# ================================================================
+# COMPLETE DEVSECOPS PIPELINE
+# ================================================================
+# Phase 1: SCA   — Snyk (library vulnerabilities)
+# Phase 2: Secrets — TruffleHog (leaked API keys/passwords)
+# Phase 3: Container — Trivy (Docker image scanning)
+# Phase 6: IaC   — Checkov (Dockerfile & YAML misconfigurations)
+# Phase 7: SBOM  — Syft (Software Bill of Materials)
+# ================================================================
 
 on:
   push:
@@ -7,45 +17,127 @@ on:
     branches: [ "main" ]
 
 jobs:
-  security_scan:
+  # ============================================================
+  # JOB 1: SCA + SECRET SCANNING (Fast checks first)
+  # ============================================================
+  sca-and-secrets:
+    name: "Phase 1+2: SCA & Secret Scanning"
     runs-on: ubuntu-latest
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
     steps:
-      - name: Checkout Code
+      - name: "📥 Checkout Code"
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Setup Node.js
+      - name: "🔧 Setup Node.js"
         uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: '20'
 
-      # Step 1: Software Composition Analysis (SCA) 
-      # Ye check karega ke axios aur lodash ke purane versions mein kya masle hain
-      - name: Run Snyk to check for vulnerabilities
+      # ── Phase 1: SCA ──────────────────────────────────────────
+      # Snyk checks axios, lodash aur saari libraries ke CVEs
+      - name: "🔍 Phase 1 — Snyk SCA (Library Vulnerabilities)"
         uses: snyk/actions/node@master
-        continue-on-error: true # Takay pipeline rukay nahi aur hum results dekh sakein
+        continue-on-error: true
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        with:
+          args: --all-projects --severity-threshold=high
 
-      # Step 2: Secret Scanning
-      # Ye check karega ke ghalti se koi API key to push nahi ho gayi
-      - name: TruffleHog OSS
+      # ── Phase 2: Secret Scanning ──────────────────────────────
+      # TruffleHog checks ke koi API key/password push to nahi hua
+      - name: "🔐 Phase 2 — TruffleHog Secret Scanning"
         uses: trufflesecurity/trufflehog@main
         with:
           path: ./
           base: ${{ github.event.repository.default_branch }}
           head: HEAD
+          extra_args: --debug --only-verified
 
-      - name: Build Docker Image
+  # ============================================================
+  # JOB 2: IaC SCANNING — Checkov
+  # ============================================================
+  iac-scanning:
+    name: "Phase 6: IaC — Checkov Infrastructure Scan"
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: "📥 Checkout Code"
+        uses: actions/checkout@v4
+
+      # ── Phase 6: IaC Scanning ─────────────────────────────────
+      # Checkov Dockerfile aur GitHub Actions YAML scan karta hai
+      # Misconfiguration dhundta hai — jaise root user, missing healthcheck etc.
+      - name: "🏗️ Phase 6 — Checkov IaC Scan (Dockerfile + YAML)"
+        uses: bridgecrewio/checkov-action@master
+        with:
+          directory: devsecops-dashboard
+          # Dockerfile aur GitHub Actions YAML scan karo
+          framework: dockerfile,github_actions
+          # Soft fail — pipeline rukay nahi, sirf report show karo
+          soft_fail: true
+          # SARIF format mein GitHub Security tab mein results
+          output_format: sarif
+          output_file_path: checkov-results.sarif
+
+      - name: "📤 Upload Checkov Results to GitHub Security"
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: checkov-results.sarif
+          category: checkov-iac
+
+  # ============================================================
+  # JOB 3: CONTAINER SCANNING + SBOM
+  # ============================================================
+  container-and-sbom:
+    name: "Phase 3+7: Container Scan & SBOM Generation"
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: "📥 Checkout Code"
+        uses: actions/checkout@v4
+
+      - name: "🐳 Build Docker Image"
         run: docker build -t threat-monitor-app:latest .
+        working-directory: devsecops-dashboard
 
-      - name: Run Trivy Image Scan
+      # ── Phase 3: Container Scanning ───────────────────────────
+      # Trivy Docker image mein OS packages aur libraries scan karta hai
+      - name: "🔍 Phase 3 — Trivy Container Image Scan"
         uses: aquasecurity/trivy-action@master
-        continue-on-error: true
         with:
           image-ref: 'threat-monitor-app:latest'
-          format: 'table'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
           severity: 'CRITICAL,HIGH'
+          exit-code: '0'
+
+      - name: "📤 Upload Trivy Results to GitHub Security"
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: trivy-results.sarif
+          category: trivy-container
+
+      # ── Phase 7: SBOM Generation ──────────────────────────────
+      # Syft Docker image ke andar saare packages ki list banata hai
+      # Ye "Software Bill of Materials" hai — ek ingredient list ki tarah
+      - name: "📋 Phase 7 — Syft SBOM Generation"
+        uses: anchore/sbom-action@v0
+        with:
+          image: threat-monitor-app:latest
+          artifact-name: sbom-threat-monitor-app.spdx.json
+          format: spdx-json
+          output-file: sbom-threat-monitor-app.spdx.json
+
+      # SBOM ko artifact ke tor par save karo
+      - name: "💾 Save SBOM as Artifact"
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-report
+          path: sbom-threat-monitor-app.spdx.json
+          retention-days: 90
